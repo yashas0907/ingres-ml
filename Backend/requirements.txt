@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pandas
+pydantic
+requests
+beautifulsoup4
+starlette
+huggingface_hub
+duckduckgo_search

@@ -1,0 +1,37 @@
+{
+  "classifiers": {
+    "svm": {
+      "accuracy": 97.5
+    },
+    "random_forest": {
+      "accuracy": 100.0
+    },
+    "decision_tree": {
+      "accuracy": 100.0
+    },
+    "best_model": "random_forest",
+    "feature_importances": {
+      "extraction_pct": 98.81,
+      "recharge_level": 0.41,
+      "rainfall_mm": 0.41,
+      "population_density": 0.37
+    }
+  },
+  "regressors": {
+    "linear_regression": {
+      "rmse": 28.003,
+      "r2": 0.1038
+    },
+    "random_forest": {
+      "rmse": 15.822,
+      "r2": 0.7139
+    },
+    "best_model": "random_forest",
+    "feature_importances": {
+      "year": 3.24,
+      "rainfall_mm": 43.27,
+      "recharge_level": 4.54,
+      "population_density": 48.95
+    }
+  }
+}
