@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-import sqlite3
+import pymongo
 import os
 import random
 
@@ -47,13 +47,16 @@ def extraction_to_category(extraction):
         return "over-exploited"
 
 
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/")
+DB_NAME = "ingres_db"
+
 def load_existing_data():
-    db_path = os.path.join(os.path.dirname(__file__), "..", "ingres.db")
-    if not os.path.exists(db_path):
-        return pd.DataFrame()
     try:
-        with sqlite3.connect(db_path) as conn:
-            df = pd.read_sql("SELECT * FROM assessments", conn)
+        client = pymongo.MongoClient(MONGODB_URI, serverSelectionTimeoutMS=2000)
+        db = client[DB_NAME]
+        df = pd.DataFrame(list(db.assessments.find()))
+        if not df.empty and '_id' in df.columns:
+            df = df.drop(columns=['_id'])
         return df
     except Exception:
         return pd.DataFrame()
@@ -125,12 +128,12 @@ def generate_trend_dataset(n_per_state=8, seed=42):
     rows = []
     years = list(range(2010, 2025))
 
-    db_path = os.path.join(os.path.dirname(__file__), "..", "ingres.db")
     anchor_data = {}
-    if os.path.exists(db_path):
-        try:
-            with sqlite3.connect(db_path) as conn:
-                trends = pd.read_sql("SELECT * FROM state_trends", conn)
+    try:
+        client = pymongo.MongoClient(MONGODB_URI, serverSelectionTimeoutMS=2000)
+        db = client[DB_NAME]
+        trends = pd.DataFrame(list(db.state_trends.find()))
+        if not trends.empty:
             for _, row in trends.iterrows():
                 state = str(row.get("State", "")).lower().strip()
                 anchor_data[state] = {

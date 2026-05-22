@@ -1,13 +1,14 @@
 import os
 import json
-import sqlite3
-from fastapi import APIRouter
+import motor.motor_asyncio
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from typing import Optional, List
 
 router = APIRouter(prefix="/api/ml", tags=["ML"])
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "ingres.db")
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/")
+DB_NAME = "ingres_db"
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
 
 CATEGORY_COLORS = {
@@ -56,13 +57,8 @@ class CompareRequest(BaseModel):
     locations: List[str]
 
 
-def get_db_connection():
-    if not os.path.exists(DB_PATH):
-        alt = os.path.join(os.path.dirname(__file__), "..", "..", "ingres.db")
-        if os.path.exists(alt):
-            return sqlite3.connect(alt)
-        return None
-    return sqlite3.connect(DB_PATH)
+def get_db(request: Request):
+    return request.app.state.db
 
 
 def load_training_summary():
@@ -145,148 +141,147 @@ async def predict_groundwater(req: ExtractionPredictRequest):
 
 
 @router.get("/top-risk-districts")
-async def top_risk_districts(limit: int = 15):
-    conn = get_db_connection()
-    if conn is None:
+async def top_risk_districts(request: Request, limit: int = 15):
+    db = get_db(request)
+    assessments_coll = db.assessments
+    sample = await assessments_coll.find_one()
+    if not sample:
         return {"districts": []}
-    try:
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA table_info(assessments)")
-        cols = [info[1] for info in cursor.fetchall()]
-        state_col = next((c for c in cols if "state" in c.lower()), "state")
-        dist_col = next((c for c in cols if "district" in c.lower()), "district_name")
-        extr_col = next((c for c in cols if "extract" in c.lower()), "extraction")
-        cat_col = next((c for c in cols if "categor" in c.lower()), "category")
-        cursor.execute(
-            f'SELECT "{state_col}", "{dist_col}", "{extr_col}", "{cat_col}" '
-            f'FROM assessments ORDER BY CAST("{extr_col}" AS REAL) DESC LIMIT ?',
-            (limit,)
-        )
-        rows = cursor.fetchall()
-        return {
-            "districts": [
-                {
-                    "state": r[0], "district": r[1],
-                    "extraction": round(float(r[2]), 1),
-                    "category": r[3],
-                    "color": CATEGORY_COLORS.get(str(r[3]).strip().title(), "#e74c3c")
-                }
-                for r in rows if r[2] is not None
-            ]
-        }
-    finally:
-        conn.close()
+
+    cols = list(sample.keys())
+    state_col = next((c for c in cols if "state" in c.lower()), "state")
+    dist_col = next((c for c in cols if "district" in c.lower()), "district_name")
+    extr_col = next((c for c in cols if "extract" in c.lower()), "extraction")
+    cat_col = next((c for c in cols if "categor" in c.lower()), "category")
+
+    cursor = assessments_coll.find().sort(extr_col, -1).limit(limit)
+    rows = await cursor.to_list(length=limit)
+
+    return {
+        "districts": [
+            {
+                "state": r.get(state_col),
+                "district": r.get(dist_col),
+                "extraction": round(float(r.get(extr_col, 0)), 1),
+                "category": r.get(cat_col),
+                "color": CATEGORY_COLORS.get(str(r.get(cat_col)).strip().title(), "#e74c3c")
+            }
+            for r in rows if r.get(extr_col) is not None
+        ]
+    }
 
 
 @router.get("/district-distribution")
-async def district_distribution():
-    conn = get_db_connection()
-    if conn is None:
+async def district_distribution(request: Request):
+    db = get_db(request)
+    assessments_coll = db.assessments
+    sample = await assessments_coll.find_one()
+    if not sample:
         return {"distribution": []}
-    try:
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA table_info(assessments)")
-        cols = [info[1] for info in cursor.fetchall()]
-        cat_col = next((c for c in cols if "categor" in c.lower()), "category")
-        cursor.execute(
-            f'SELECT "{cat_col}", COUNT(*) as cnt FROM assessments GROUP BY "{cat_col}"'
-        )
-        rows = cursor.fetchall()
-        total = sum(r[1] for r in rows)
-        return {
-            "distribution": [
-                {
-                    "category": r[0],
-                    "count": r[1],
-                    "percentage": round(r[1] / total * 100, 1) if total else 0,
-                    "color": CATEGORY_COLORS.get(str(r[0]).strip().title(), "#888")
-                }
-                for r in rows if r[0]
-            ]
-        }
-    finally:
-        conn.close()
+
+    cols = list(sample.keys())
+    cat_col = next((c for c in cols if "categor" in c.lower()), "category")
+
+    pipeline = [
+        {"$group": {"_id": f"${cat_col}", "cnt": {"$sum": 1}}}
+    ]
+    rows = await assessments_coll.aggregate(pipeline).to_list(length=None)
+    total = sum(r["cnt"] for r in rows)
+
+    return {
+        "distribution": [
+            {
+                "category": r["_id"],
+                "count": r["cnt"],
+                "percentage": round(r["cnt"] / total * 100, 1) if total else 0,
+                "color": CATEGORY_COLORS.get(str(r["_id"]).strip().title(), "#888")
+            }
+            for r in rows if r["_id"]
+        ]
+    }
 
 
 @router.get("/trend-analysis")
-async def trend_analysis():
-    conn = get_db_connection()
-    if conn is None:
+async def trend_analysis(request: Request):
+    db = get_db(request)
+    state_trends_coll = db.state_trends
+
+    rows = await state_trends_coll.find().to_list(length=None)
+    if not rows:
         return {"trends": []}
-    try:
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA table_info(state_trends)")
-        cols_info = cursor.fetchall()
-        if not cols_info:
-            return {"trends": []}
-        cols = [info[1] for info in cols_info]
-        state_col = cols[0]
-        year_cols = [c for c in cols if c != state_col]
-        cursor.execute(f'SELECT * FROM state_trends')
-        rows = cursor.fetchall()
-        result = []
-        for row in rows:
-            state = row[0]
-            values = []
-            for i, yc in enumerate(year_cols):
-                try:
-                    values.append({"year": int(yc), "extraction": round(float(row[i + 1]), 1)})
-                except Exception:
-                    pass
-            if values:
-                last_val = values[-1]["extraction"] if values else 0
-                cat = "safe" if last_val < 70 else "semi-critical" if last_val < 90 else "critical" if last_val < 100 else "over-exploited"
-                result.append({
-                    "state": state,
-                    "values": values,
-                    "latest_extraction": last_val,
-                    "category": cat.replace("-", " ").title(),
-                    "color": CATEGORY_COLORS.get(cat.replace("-", " ").title(), "#888"),
-                })
-        result.sort(key=lambda x: x["latest_extraction"], reverse=True)
-        return {"trends": result, "years": [int(y) for y in year_cols]}
-    finally:
-        conn.close()
+
+    sample = rows[0]
+    cols = list(sample.keys())
+    state_col = next((c for c in cols if "state" in c.lower()), "State")
+    year_cols = [c for c in cols if c.isdigit()]
+    year_cols.sort()
+
+    result = []
+    for row in rows:
+        state = row.get(state_col)
+        values = []
+        for yc in year_cols:
+            try:
+                values.append({"year": int(yc), "extraction": round(float(row.get(yc, 0)), 1)})
+            except Exception:
+                pass
+        if values:
+            last_val = values[-1]["extraction"] if values else 0
+            cat = "safe" if last_val < 70 else "semi-critical" if last_val < 90 else "critical" if last_val < 100 else "over-exploited"
+            result.append({
+                "state": state,
+                "values": values,
+                "latest_extraction": last_val,
+                "category": cat.replace("-", " ").title(),
+                "color": CATEGORY_COLORS.get(cat.replace("-", " ").title(), "#888"),
+            })
+
+    result.sort(key=lambda x: x["latest_extraction"], reverse=True)
+    return {"trends": result, "years": [int(y) for y in year_cols]}
 
 
 @router.post("/compare-districts")
-async def compare_districts(req: CompareRequest):
-    conn = get_db_connection()
-    if conn is None:
+async def compare_districts(request: Request, req: CompareRequest):
+    db = get_db(request)
+    assessments_coll = db.assessments
+    sample = await assessments_coll.find_one()
+    if not sample:
         return {"comparison": []}
-    try:
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA table_info(assessments)")
-        cols = [info[1] for info in cursor.fetchall()]
-        state_col = next((c for c in cols if "state" in c.lower()), "state")
-        dist_col = next((c for c in cols if "district" in c.lower()), "district_name")
-        extr_col = next((c for c in cols if "extract" in c.lower()), "extraction")
-        cat_col = next((c for c in cols if "categor" in c.lower()), "category")
 
-        results = []
-        for loc in req.locations:
-            loc_lower = loc.lower().strip()
-            cursor.execute(
-                f'SELECT "{state_col}", "{dist_col}", AVG(CAST("{extr_col}" AS REAL)), "{cat_col}" '
-                f'FROM assessments WHERE LOWER("{state_col}") = ? OR LOWER("{dist_col}") = ? '
-                f'GROUP BY "{state_col}", "{dist_col}" LIMIT 1',
-                (loc_lower, loc_lower)
-            )
-            row = cursor.fetchone()
-            if row:
-                extr = round(float(row[2]), 1)
-                cat = str(row[3]).strip()
-                results.append({
-                    "name": row[1].title() if row[1] else row[0].title(),
-                    "state": row[0],
-                    "extraction": extr,
-                    "category": cat,
-                    "color": CATEGORY_COLORS.get(cat.title(), "#888"),
-                    "recharge_estimate": round(extr * 0.7, 1),
-                })
-        return {"comparison": results}
-    finally:
-        conn.close()
+    cols = list(sample.keys())
+    state_col = next((c for c in cols if "state" in c.lower()), "state")
+    dist_col = next((c for c in cols if "district" in c.lower()), "district_name")
+    extr_col = next((c for c in cols if "extract" in c.lower()), "extraction")
+    cat_col = next((c for c in cols if "categor" in c.lower()), "category")
+
+    results = []
+    for loc in req.locations:
+        loc_lower = loc.lower().strip()
+
+        pipeline = [
+            {"$match": {"$or": [{state_col: {"$regex": f"^{loc}$", "$options": "i"}}, {dist_col: {"$regex": f"^{loc}$", "$options": "i"}}]}},
+            {"$group": {
+                "_id": { "state": f"${state_col}", "district": f"${dist_col}" },
+                "avg_extraction": {"$avg": f"${extr_col}"},
+                "category": {"$first": f"${cat_col}"}
+            }},
+            {"$limit": 1}
+        ]
+
+        agg_res = await assessments_coll.aggregate(pipeline).to_list(1)
+        if agg_res:
+            row = agg_res[0]
+            extr = round(float(row["avg_extraction"]), 1)
+            cat = str(row["category"]).strip()
+            results.append({
+                "name": row["_id"]["district"].title() if row["_id"]["district"] else row["_id"]["state"].title(),
+                "state": row["_id"]["state"],
+                "extraction": extr,
+                "category": cat,
+                "color": CATEGORY_COLORS.get(cat.title(), "#888"),
+                "recharge_estimate": round(extr * 0.7, 1),
+            })
+    return {"comparison": results}
 
 
 @router.get("/model-stats")
@@ -312,48 +307,38 @@ async def model_stats():
 
 
 @router.get("/overview-stats")
-async def overview_stats():
-    conn = get_db_connection()
-    if conn is None:
+async def overview_stats(request: Request):
+    db = get_db(request)
+    assessments_coll = db.assessments
+    sample = await assessments_coll.find_one()
+    if not sample:
         return {}
-    try:
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA table_info(assessments)")
-        cols = [info[1] for info in cursor.fetchall()]
-        state_col = next((c for c in cols if "state" in c.lower()), "state")
-        extr_col = next((c for c in cols if "extract" in c.lower()), "extraction")
-        cat_col = next((c for c in cols if "categor" in c.lower()), "category")
 
-        cursor.execute(f'SELECT COUNT(*) FROM assessments')
-        total_blocks = cursor.fetchone()[0]
+    cols = list(sample.keys())
+    state_col = next((c for c in cols if "state" in c.lower()), "state")
+    extr_col = next((c for c in cols if "extract" in c.lower()), "extraction")
+    cat_col = next((c for c in cols if "categor" in c.lower()), "category")
 
-        cursor.execute(f'SELECT COUNT(DISTINCT "{state_col}") FROM assessments')
-        total_states = cursor.fetchone()[0]
+    total_blocks = await assessments_coll.count_documents({})
 
-        cursor.execute(
-            f'SELECT COUNT(*) FROM assessments WHERE LOWER("{cat_col}") = ?',
-            ("over-exploited",)
-        )
-        over_exploited = cursor.fetchone()[0]
+    total_states_res = await assessments_coll.distinct(state_col)
+    total_states = len(total_states_res)
 
-        cursor.execute(
-            f'SELECT AVG(CAST("{extr_col}" AS REAL)) FROM assessments'
-        )
-        avg_extraction = cursor.fetchone()[0]
+    over_exploited = await assessments_coll.count_documents({cat_col: {"$regex": "^over-exploited$", "$options": "i"}})
 
-        cursor.execute(
-            f'SELECT COUNT(*) FROM assessments WHERE LOWER("{cat_col}") = ?',
-            ("safe",)
-        )
-        safe_count = cursor.fetchone()[0]
+    pipeline = [
+        {"$group": {"_id": None, "avg_extraction": {"$avg": f"${extr_col}"}}}
+    ]
+    agg_res = await assessments_coll.aggregate(pipeline).to_list(1)
+    avg_extraction = agg_res[0]["avg_extraction"] if agg_res else 0
 
-        return {
-            "total_blocks": total_blocks,
-            "total_states": total_states,
-            "over_exploited_blocks": over_exploited,
-            "safe_blocks": safe_count,
-            "avg_extraction": round(float(avg_extraction or 0), 1),
-            "over_exploited_pct": round(over_exploited / total_blocks * 100, 1) if total_blocks else 0,
-        }
-    finally:
-        conn.close()
+    safe_count = await assessments_coll.count_documents({cat_col: {"$regex": "^safe$", "$options": "i"}})
+
+    return {
+        "total_blocks": total_blocks,
+        "total_states": total_states,
+        "over_exploited_blocks": over_exploited,
+        "safe_blocks": safe_count,
+        "avg_extraction": round(float(avg_extraction or 0), 1),
+        "over_exploited_pct": round(over_exploited / total_blocks * 100, 1) if total_blocks else 0,
+    }
