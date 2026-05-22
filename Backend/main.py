@@ -4,7 +4,7 @@ import asyncio
 import requests
 import json
 import math
-import sqlite3
+import motor.motor_asyncio
 import re
 from huggingface_hub import InferenceClient, AsyncInferenceClient
 from fastapi import FastAPI, Request
@@ -126,31 +126,42 @@ from contextlib import asynccontextmanager
 
 semantic_search = SemanticSearch()
 
-# Database path configuration
-DB_PATH = os.path.join(os.path.dirname(__file__), "ingres.db")
-if not os.path.exists(DB_PATH):
-    DB_PATH = "./ingres.db"
+# Database configuration
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/")
+DB_NAME = "ingres_db"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialize MongoDB client
+    app.state.mongo_client = motor.motor_asyncio.AsyncIOMotorClient(MONGODB_URI)
+    app.state.db = app.state.mongo_client[DB_NAME]
+
     # Initialize semantic search and cache locations
     try:
-        with sqlite3.connect(DB_PATH) as conn:
-            cursor = conn.cursor()
-            cursor.execute("PRAGMA table_info(assessments)")
-            cols = [info[1] for info in cursor.fetchall()]
-            state_col = next((c for c in cols if "state" in c.lower()), "State")
-            dist_col = next((c for c in cols if "district" in c.lower()), "District")
-            block_col = next((c for c in cols if "block" in c.lower() or "taluka" in c.lower()), "Block/Taluka")
+        db = app.state.db
+        assessments_coll = db.assessments
 
-            cursor.execute(f'SELECT DISTINCT "{state_col}" FROM assessments')
-            app.state.states_list = [r[0] for r in cursor.fetchall() if r[0]]
-            cursor.execute(f'SELECT DISTINCT "{dist_col}" FROM assessments')
-            app.state.districts_list = [r[0] for r in cursor.fetchall() if r[0]]
-            cursor.execute(f'SELECT DISTINCT "{block_col}" FROM assessments')
-            blocks = [r[0] for r in cursor.fetchall() if r[0]]
+        # Get one document to determine field names
+        sample = await assessments_coll.find_one()
+        if sample:
+            cols = list(sample.keys())
+            state_col = next((c for c in cols if "state" in c.lower()), "state")
+            dist_col = next((c for c in cols if "district" in c.lower()), "district_name")
+            block_col = next((c for c in cols if "block" in c.lower() or "taluka" in c.lower()), "block_name")
 
-            if not semantic_search.load_embeddings():
+            app.state.states_list = await assessments_coll.distinct(state_col)
+            app.state.districts_list = await assessments_coll.distinct(dist_col)
+            blocks = await assessments_coll.distinct(block_col)
+
+            app.state.states_list = [s for s in app.state.states_list if s]
+            app.state.districts_list = [d for d in app.state.districts_list if d]
+            blocks = [b for b in blocks if b]
+        else:
+            app.state.states_list = []
+            app.state.districts_list = []
+            blocks = []
+
+        if not semantic_search.load_embeddings():
                 # Unified corpus: locations + dictionary keys
                 knowledge_keys = list(KNOWLEDGE_BASE.keys())
                 tips_keys = list(TIPS.keys())
@@ -717,18 +728,14 @@ async def get_rule_based_response(user_input: str, request: Request):
     if results:
         best_match = results[0]["name"]
         match_key = best_match.lower()
+        db = request.app.state.db
 
         # --- A. CHECK FOR TREND INTENT ---
         if detect_trend_intent(user_input):
             trend_data = None
             try:
-                with sqlite3.connect(DB_PATH) as conn:
-                    conn.row_factory = sqlite3.Row
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT * FROM state_trends WHERE state = ?", (match_key,))
-                    row = cursor.fetchone()
-                    if row:
-                        trend_data = dict(row)
+                # In MongoDB we stored it with 'State' or 'state'
+                trend_data = await db.state_trends.find_one({"$or": [{"State": match_key}, {"state": match_key}]})
             except Exception as e:
                 print(f"Trend DB error: {e}")
 
@@ -826,14 +833,14 @@ async def get_rule_based_response(user_input: str, request: Request):
         # 5. Data Lookup: Location (Priority 3)
         found_data = []
         try:
-            with sqlite3.connect(DB_PATH) as conn:
-                cursor = conn.cursor()
-                cursor.execute("PRAGMA table_info(assessments)")
-                cols = [info[1] for info in cursor.fetchall()]
-                state_col = next((c for c in cols if "state" in c.lower()), "State")
-                dist_col = next((c for c in cols if "district" in c.lower()), "District")
-                block_col = next((c for c in cols if "block" in c.lower() or "taluka" in c.lower()), "Block/Taluka")
-                extract_col = next((c for c in cols if "extraction" in c.lower() or "stage" in c.lower()), "Stage of Ground Water Extraction (%)")
+            assessments_coll = db.assessments
+            sample = await assessments_coll.find_one()
+            if sample:
+                cols = list(sample.keys())
+                state_col = next((c for c in cols if "state" in c.lower()), "state")
+                dist_col = next((c for c in cols if "district" in c.lower()), "district_name")
+                block_col = next((c for c in cols if "block" in c.lower() or "taluka" in c.lower()), "block_name")
+                extract_col = next((c for c in cols if "extraction" in c.lower() or "stage" in c.lower()), "extraction")
 
                 states_list = getattr(request.app.state, "states_list", [])
                 districts_list = getattr(request.app.state, "districts_list", [])
@@ -848,19 +855,27 @@ async def get_rule_based_response(user_input: str, request: Request):
                     seen.add(name_low)
 
                     if name_low in states_map:
-                        cursor.execute(f'SELECT AVG("{extract_col}") FROM assessments WHERE "{state_col}" = ?', (states_map[name_low],))
+                        pipeline = [
+                            {"$match": {state_col: states_map[name_low]}},
+                            {"$group": {"_id": None, "avg_extraction": {"$avg": f"${extract_col}"}}}
+                        ]
+                        agg_res = await assessments_coll.aggregate(pipeline).to_list(1)
+                        val = agg_res[0]["avg_extraction"] if agg_res else None
                     elif name_low in districts_map:
-                        cursor.execute(f'SELECT AVG("{extract_col}") FROM assessments WHERE "{dist_col}" = ?', (districts_map[name_low],))
+                        pipeline = [
+                            {"$match": {dist_col: districts_map[name_low]}},
+                            {"$group": {"_id": None, "avg_extraction": {"$avg": f"${extract_col}"}}}
+                        ]
+                        agg_res = await assessments_coll.aggregate(pipeline).to_list(1)
+                        val = agg_res[0]["avg_extraction"] if agg_res else None
                     elif name_low in KNOWLEDGE_BASE or name_low in TIPS or name_low in WHY_MAP:
-                        # If it's a key in our dicts, we might have already handled it as Priority 2.
-                        # We skip it here if it doesn't match a location.
                         continue
                     else:
-                        cursor.execute(f'SELECT "{extract_col}" FROM assessments WHERE "{block_col}" = ?', (name,))
+                        doc = await assessments_coll.find_one({block_col: name})
+                        val = doc.get(extract_col) if doc else None
 
-                    val = cursor.fetchone()
-                    if val and val[0] is not None:
-                        found_data.append({"name": name, "extraction": round(val[0], 2)})
+                    if val is not None:
+                        found_data.append({"name": name, "extraction": round(float(val), 2)})
 
                     if len(found_data) >= 5: break
 

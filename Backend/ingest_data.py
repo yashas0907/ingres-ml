@@ -1,5 +1,9 @@
 import pandas as pd
-import sqlite3
+import pymongo
+import os
+
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/")
+DB_NAME = "ingres_db"
 
 def setup_database():
     try:
@@ -13,20 +17,27 @@ def setup_database():
         df['district_name'] = df['district_name'].str.strip().str.lower()
         df['block_name'] = df['block_name'].str.strip().str.lower()
 
-        conn = sqlite3.connect("ingres.db")
-        df.to_sql("assessments", conn, if_exists="replace", index=False)
+        client = pymongo.MongoClient(MONGODB_URI)
+        db = client[DB_NAME]
+
+        # Ingest assessments
+        db.assessments.drop()
+        db.assessments.insert_many(df.to_dict("records"))
+        print("✅ Assessments data ingested to MongoDB!")
 
         # Load Trend Data
         try:
             df_trends = pd.read_csv("india_groundwater_trends.csv")
             df_trends['State'] = df_trends['State'].str.strip().str.lower()
-            df_trends.to_sql("state_trends", conn, if_exists="replace", index=False)
-            print("✅ Trend data ingested!")
+
+            db.state_trends.drop()
+            db.state_trends.insert_many(df_trends.to_dict("records"))
+            print("✅ Trend data ingested to MongoDB!")
         except Exception as trend_e:
             print(f"⚠️ Trend data skip: {trend_e}")
 
-        conn.close()
-        print("✅ Database REBUILT with clean names!")
+        client.close()
+        print("✅ MongoDB Database REBUILT with clean names!")
     except Exception as e:
         print(f"❌ Error: {e}")
 
