@@ -55,8 +55,8 @@ INGRES is a full-stack AI and Machine Learning platform that analyzes India's gr
 INGRES/
 ├── Backend/
 │   ├── main.py                        # FastAPI app, AI chat endpoints, CORS
-│   ├── ingest_data.py                 # CSV to SQLite ingestion
-│   ├── ingres.db                      # SQLite database
+│   ├── ingest_data.py                 # CSV to MongoDB ingestion
+│   ├── migrate_to_mongodb.py          # SQLite to MongoDB migration tool
 │   ├── india_groundwater_2022.csv     # Block-level assessment data
 │   ├── india_groundwater_trends.csv   # State-level historical trends
 │   ├── ml/
@@ -135,7 +135,7 @@ Response:
 
 ## ML Workflow
 
-1. **Data Generation** — `Backend/ml/dataset.py` generates 6,000 training samples using real extraction data from the CGWB database plus realistic synthetic augmentation
+1. **Data Generation** — `Backend/ml/dataset.py` generates 6,000 training samples using real extraction data from the MongoDB database plus realistic synthetic augmentation
 2. **Classification Training** — SVM, Random Forest, and Decision Tree are trained on extraction %, recharge level, rainfall, and population density
 3. **Regression Training** — Linear Regression and Random Forest Regressor trained on yearly temporal features to predict future extraction levels
 4. **Model Persistence** — Best models saved as `.pkl` files via joblib; metrics stored in `training_summary.json`
@@ -148,14 +148,26 @@ Response:
 ### Prerequisites
 - Python 3.9+
 - Node.js 18+
+- MongoDB 6.0+
 - HuggingFace API token (HF_TOKEN) for AI chat features
 
-### Backend
+### Environment Variables
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MONGODB_URI` | MongoDB connection string | `mongodb://localhost:27017/` |
+| `HF_TOKEN` | HuggingFace API Token | *Required* |
+
+### Backend Setup
 ```bash
 cd Backend
 pip install -r requirements.txt
+
+# Ingest data into MongoDB
+python ingest_data.py
+
 # (Optional) Re-train ML models
 python -m ml.train
+
 # Start server
 uvicorn main:app --host localhost --port 8000
 ```
@@ -173,6 +185,17 @@ npm run dev
 
 - **india_groundwater_2022.csv** — Block-level groundwater extraction data from CGWB 2022 assessment. Columns: State, District, Block/Taluka, Stage of Ground Water Extraction (%), Category
 - **india_groundwater_trends.csv** — State-level historical extraction trends for 2017, 2020, and 2022
+
+---
+
+## Database Migration (SQLite to MongoDB)
+
+If you have an existing `ingres.db` and wish to migrate your data to MongoDB, run:
+```bash
+cd Backend
+python migrate_to_mongodb.py
+```
+Ensure your MongoDB instance is running and your `MONGODB_URI` is correctly set.
 
 ---
 
@@ -196,7 +219,7 @@ npm run dev
 | AI/LLM | Meta Llama 3 8B via HuggingFace Inference API |
 | Semantic Search | sentence-transformers/all-mpnet-base-v2 |
 | ML Models | scikit-learn (SVM, Random Forest, Decision Tree, Linear Regression) |
-| Database | SQLite |
+| Database | MongoDB |
 | Frontend | React 19 + Vite (rolldown-vite) |
 | Charts | Chart.js, react-chartjs-2, recharts |
 | Map | @react-map/india |
