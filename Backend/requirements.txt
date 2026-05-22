@@ -7,3 +7,5 @@ beautifulsoup4
 starlette
 huggingface_hub
 duckduckgo_search
+motor
+pymongo
