@@ -18,6 +18,8 @@ MONGODB_URI=mongodb+srv://<user>:<password>@<cluster-url>/?retryWrites=true&w=ma
 MONGODB_DB_NAME=ingres_db
 MONGODB_TIMEOUT_MS=5000
 HF_TOKEN=<your-huggingface-token>
+GROQ_API_KEY=<your-groq-api-key>
+GROQ_MODEL=llama-3.3-70b-versatile
 CORS_ORIGINS=*
 GEMMA_ENDPOINT_URL=<optional-gemma-endpoint-url>
 GEMMA_ENDPOINT_FORMAT=openai
@@ -28,7 +30,12 @@ GEMMA_TIMEOUT_SECONDS=45
 
 After the frontend is deployed, replace `CORS_ORIGINS=*` with the frontend URL.
 
-If `GEMMA_ENDPOINT_URL` is set, `/ask` uses the hosted Gemma endpoint to rewrite verified groundwater context. If it is not set, the app falls back to the deterministic response path or HuggingFace when `HF_TOKEN` is present.
+LLM priority for `/ask` is:
+
+1. Groq when `GROQ_API_KEY` is set.
+2. Hosted Gemma when `GEMMA_ENDPOINT_URL` is set.
+3. HuggingFace when `HF_TOKEN` is set.
+4. Deterministic verified context fallback.
 
 ## Migrate data to MongoDB Atlas
 

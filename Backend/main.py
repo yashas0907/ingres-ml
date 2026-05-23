@@ -8,6 +8,7 @@ import motor.motor_asyncio
 import re
 import certifi
 from huggingface_hub import InferenceClient, AsyncInferenceClient
+from openai import OpenAI
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,11 +24,17 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 # -------------------- GLOBAL GENAI CLIENT --------------------
 HF_TOKEN = os.getenv("HF_TOKEN")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 GENAI_CLIENT = AsyncInferenceClient(
     token=HF_TOKEN,
     timeout=60
 )
 GEMMA_CLIENT = GemmaEndpointClient.from_env()
+GROQ_CLIENT = OpenAI(
+    base_url="https://api.groq.com/openai/v1",
+    api_key=GROQ_API_KEY,
+) if GROQ_API_KEY else None
 
 
 # -------------------- CORRECTED SEMANTIC SEARCH --------------------
@@ -242,6 +249,25 @@ async def get_smart_response(user_query: str, context: str):
     # THE REAL USER QUERY (This stays at the end)
         {"role": "user", "content": f"USER QUESTION:\n{user_query}\n\nVERIFIED CONTEXT:\n{context}"}
     ]
+
+    if GROQ_CLIENT:
+        try:
+            def complete_with_groq():
+                response = GROQ_CLIENT.chat.completions.create(
+                    model=GROQ_MODEL,
+                    messages=messages,
+                    temperature=0.2,
+                    max_tokens=300,
+                )
+                return response.choices[0].message.content or ""
+
+            text = await run_in_threadpool(complete_with_groq)
+            for ch in text:
+                yield ch
+                await asyncio.sleep(0.01)
+            return
+        except Exception as e:
+            print(f"Groq error: {e}")
 
     if GEMMA_CLIENT.is_configured:
         try:
