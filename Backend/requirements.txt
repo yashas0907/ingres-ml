@@ -12,3 +12,4 @@ pymongo
 numpy
 scikit-learn
 joblib
+certifi

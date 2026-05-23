@@ -6,6 +6,7 @@ import json
 import math
 import motor.motor_asyncio
 import re
+import certifi
 from huggingface_hub import InferenceClient, AsyncInferenceClient
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse, FileResponse
@@ -142,6 +143,7 @@ async def lifespan(app: FastAPI):
     app.state.mongo_client = motor.motor_asyncio.AsyncIOMotorClient(
         MONGODB_URI,
         serverSelectionTimeoutMS=MONGODB_TIMEOUT_MS,
+        tlsCAFile=certifi.where(),
     )
     app.state.db = app.state.mongo_client[DB_NAME]
 

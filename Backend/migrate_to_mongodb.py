@@ -2,6 +2,7 @@ import sqlite3
 import pymongo
 import os
 import pandas as pd
+import certifi
 from urllib.parse import urlsplit, urlunsplit
 
 # Database path configuration
@@ -40,7 +41,11 @@ def migrate():
     mongo_client = None
     print(f"Connecting to MongoDB at {redact_mongodb_uri(MONGODB_URI)}...")
     try:
-        mongo_client = pymongo.MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+        mongo_client = pymongo.MongoClient(
+            MONGODB_URI,
+            serverSelectionTimeoutMS=5000,
+            tlsCAFile=certifi.where(),
+        )
         # Force a connection attempt
         mongo_client.server_info()
         db = mongo_client[DB_NAME]
