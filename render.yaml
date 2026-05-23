@@ -18,5 +18,15 @@ services:
         value: "5000"
       - key: HF_TOKEN
         sync: false
+      - key: GEMMA_ENDPOINT_URL
+        sync: false
+      - key: GEMMA_ENDPOINT_FORMAT
+        value: openai
+      - key: GEMMA_MODEL
+        value: ingres-gemma
+      - key: GEMMA_API_KEY
+        sync: false
+      - key: GEMMA_TIMEOUT_SECONDS
+        value: "45"
       - key: CORS_ORIGINS
         value: "*"

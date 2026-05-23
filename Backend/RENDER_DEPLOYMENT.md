@@ -19,9 +19,16 @@ MONGODB_DB_NAME=ingres_db
 MONGODB_TIMEOUT_MS=5000
 HF_TOKEN=<your-huggingface-token>
 CORS_ORIGINS=*
+GEMMA_ENDPOINT_URL=<optional-gemma-endpoint-url>
+GEMMA_ENDPOINT_FORMAT=openai
+GEMMA_MODEL=ingres-gemma
+GEMMA_API_KEY=<optional-endpoint-secret>
+GEMMA_TIMEOUT_SECONDS=45
 ```
 
 After the frontend is deployed, replace `CORS_ORIGINS=*` with the frontend URL.
+
+If `GEMMA_ENDPOINT_URL` is set, `/ask` uses the hosted Gemma endpoint to rewrite verified groundwater context. If it is not set, the app falls back to the deterministic response path or HuggingFace when `HF_TOKEN` is present.
 
 ## Migrate data to MongoDB Atlas
 

@@ -17,14 +17,17 @@ from pydantic import BaseModel
 from bs4 import BeautifulSoup
 from fastapi.middleware.cors import CORSMiddleware
 from duckduckgo_search import DDGS
+from llm.gemma_client import GemmaEndpointClient, SYSTEM_PROMPT
 
 sys.path.insert(0, os.path.dirname(__file__))
 
 # -------------------- GLOBAL GENAI CLIENT --------------------
+HF_TOKEN = os.getenv("HF_TOKEN")
 GENAI_CLIENT = AsyncInferenceClient(
-    token=os.getenv("HF_TOKEN"),
+    token=HF_TOKEN,
     timeout=60
 )
+GEMMA_CLIENT = GemmaEndpointClient.from_env()
 
 
 # -------------------- CORRECTED SEMANTIC SEARCH --------------------
@@ -36,7 +39,7 @@ class SemanticSearch:
             cls._instance = super(SemanticSearch, cls).__new__(cls)
             # Initialize InferenceClient with the router base URL as required for Render
             cls._instance.model_id = "sentence-transformers/all-mpnet-base-v2"
-            cls._instance.hf_token = os.getenv("HF_TOKEN")
+            cls._instance.hf_token = HF_TOKEN
             cls._instance.client = InferenceClient(
                 token=cls._instance.hf_token,
                 headers={"X-Wait-For-Model": "true"}
@@ -47,6 +50,8 @@ class SemanticSearch:
         return cls._instance
 
     def _query_api(self, inputs):
+        if not self.hf_token:
+            return None
         try:
             # InferenceClient.feature_extraction explicitly requests the feature-extraction task
             response = self.client.feature_extraction(inputs, model=self.model_id)
@@ -172,7 +177,7 @@ async def lifespan(app: FastAPI):
             app.state.districts_list = []
             blocks = []
 
-        if not semantic_search.load_embeddings():
+        if not semantic_search.load_embeddings() and semantic_search.hf_token:
                 # Unified corpus: locations + dictionary keys
                 knowledge_keys = list(KNOWLEDGE_BASE.keys())
                 tips_keys = list(TIPS.keys())
@@ -205,8 +210,7 @@ async def get_smart_response(user_query: str, context: str):
     context = context[:3500]
 
     system_prompt = (
-        "You are the 'Indian Groundwater Intelligence Bot'. Your goal is to translate technical "
-        "CGWB (Central Ground Water Board) data into easy-to-understand, actionable advice.\n"
+        f"{SYSTEM_PROMPT}\n"
         "GUIDELINES:\n"
         "If extraction > 100%, use a concerned but professional tone.\n"
         "Use Indian terminology (e.g., 'Taluka', 'Lakh', 'Kharif/Rabi') where appropriate.\n"
@@ -238,6 +242,19 @@ async def get_smart_response(user_query: str, context: str):
     # THE REAL USER QUERY (This stays at the end)
         {"role": "user", "content": f"USER QUESTION:\n{user_query}\n\nVERIFIED CONTEXT:\n{context}"}
     ]
+
+    if GEMMA_CLIENT.is_configured:
+        try:
+            text = await run_in_threadpool(GEMMA_CLIENT.complete, messages, 300)
+            for ch in text:
+                yield ch
+                await asyncio.sleep(0.01)
+            return
+        except Exception as e:
+            print(f"Gemma endpoint error: {e}")
+
+    if not HF_TOKEN:
+        return
 
     try:
         # chat_completion yields chunks incrementally if stream=True
