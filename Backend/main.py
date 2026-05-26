@@ -1,6 +1,7 @@
 import os
 import sys
 import asyncio
+import time
 import requests
 import json
 import math
@@ -750,7 +751,11 @@ def detect_thanks(user_input: str) -> bool:
 
 def detect_bye(user_input: str) -> bool:
     cleaned = user_input.strip().lower().rstrip("!?.")
-    return any(b in cleaned for b in BYE_PATTERNS)
+    # Use word-boundary matching to avoid false positives (e.g. 'exit strategies')
+    for b in BYE_PATTERNS:
+        if re.search(rf'\b{re.escape(b)}\b', cleaned):
+            return True
+    return False
 
 # -------------------- VISUAL UTILS --------------------
 ACTION_KEYWORDS = ["reduce", "how to", "solution", "steps", "ways", "minimize", "conserve", "prevent", "action", "improvement", "management", "reduction", "curb", "save"]
@@ -915,6 +920,15 @@ async def get_rule_based_response(user_input: str, request: Request):
                 "skip_llm": True
             }
         print(f"[KB-MISS] No match for definition subject: '{definition_subject}'")
+
+    # --- 0d. DIRECT CONSERVATION TIPS ---
+    if any(phrase in user_input for phrase in ["conservation tips", "conservation tip", "water saving tips", "save water"]):
+        return {
+            "text": f"### Conservation Tips\n\n{TIPS['conservation']}",
+            "chartData": [],
+            "suggestions": ["Rainwater harvesting", "What is drip irrigation?", "Show India map"],
+            "skip_llm": True
+        }
 
     # YES/NO flow
     if user_input in ["yes", "show chart", "sure", "ok"]:
@@ -1246,19 +1260,36 @@ async def ask_bot(item: WaterQuery, request: Request):
         async def stream_generator():
             full_text = ""
             try:
-                # 2. Get smart response from LLM
-                async for ch in get_smart_response(item.message, context):
-                    full_text += ch
-                    yield f"data: {json.dumps({'t': ch})}\n\n"
+                # 2. Get smart response from LLM with timeout to prevent infinite hangs
+                async def consume_llm():
+                    nonlocal full_text
+                    async for ch in get_smart_response(item.message, context):
+                        full_text += ch
+                        yield ch
+
+                try:
+                    llm_gen = consume_llm()
+                    # Use a manual timeout: read chunks with a per-iteration deadline
+                    start_time = time.monotonic()
+                    LLM_TIMEOUT = 30  # seconds
+                    async for ch in llm_gen:
+                        yield f"data: {json.dumps({'t': ch})}\n\n"
+                        if time.monotonic() - start_time > LLM_TIMEOUT:
+                            print("[TIMEOUT] LLM streaming exceeded 30s, falling back")
+                            break
+                except asyncio.TimeoutError:
+                    print("[TIMEOUT] LLM call timed out after 30s")
+                except Exception as e:
+                    print(f"Streaming error: {e}")
             except Exception as e:
-                print(f"Streaming error: {e}")
+                print(f"Outer streaming error: {e}")
 
             # 3. Reliability & Fallback
             if not full_text:
                 # If LLM failed, yield base response text in characters
                 for ch in context:
                     yield f"data: {json.dumps({'t': ch})}\n\n"
-                    await asyncio.sleep(0.015)
+                    await asyncio.sleep(0.008)
 
             # 4. Final metadata for visual components
             metadata = {

@@ -96,12 +96,21 @@ export default function App() {
     setInput("");
     setLoading(true);
 
+    // Timeout safety: abort fetch after 45 seconds
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
+
     try {
       const response = await fetch(`${API_BASE}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userMsg, stream: true })
+        body: JSON.stringify({ message: userMsg, stream: true }),
+        signal: controller.signal
       });
+
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
+      }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -148,9 +157,30 @@ export default function App() {
           } catch (e) { console.error("Stream parse error", e); }
         }
       }
-    } catch {
-      setMessages((m) => [...m, { type: "bot", text: "Backend not responding. Please check your connection." }]);
+
+      // Safety: if stream ended but no text was received, show fallback
+      if (!accumulatedText.trim()) {
+        setMessages((m) => {
+          const nm = [...m];
+          nm[nm.length - 1].text = "I couldn't process that request. Please try asking something else.";
+          nm[nm.length - 1].suggestions = ["What is groundwater?", "Conservation tips", "Show India map"];
+          return nm;
+        });
+      }
+    } catch (err) {
+      const isTimeout = err.name === "AbortError";
+      setMessages((m) => [
+        ...m,
+        {
+          type: "bot",
+          text: isTimeout
+            ? "The request took too long. Please try again with a simpler question."
+            : "Backend not responding. Please check your connection.",
+          suggestions: ["What is groundwater?", "Conservation tips", "Compare Punjab and Bihar"]
+        }
+      ]);
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   };
