@@ -58,7 +58,7 @@ const GroundwaterMap = () => {
         <div className="state-details">
           <div className="state-main-info">
             <span className="state-name">{selectedState}</span>
-            <span className="state-value">{currentYearData[selectedState] || "Data not available"} mbgl</span>
+            <span className="state-value">{currentYearData[selectedState] || "N/A"} mbgl</span>
           </div>
           {contaminantData[selectedState] && (
             <div className="contaminant-warning">

@@ -7,6 +7,10 @@ import { getColor } from "./utils/mapUtils";
 
 const KarnatakaMap = ({ onBack }) => {
   const [hoveredDistrict, setHoveredDistrict] = useState(null);
+  const [selectedDistrict, setSelectedDistrict] = useState(null);
+
+  // Show hovered district info, or selected, or placeholder
+  const displayDistrict = hoveredDistrict || selectedDistrict;
 
   return (
     <div className="map-container karnataka-map" role="region" aria-label="Karnataka Groundwater Depth Map">
@@ -18,20 +22,20 @@ const KarnatakaMap = ({ onBack }) => {
       </div>
 
       <div className="state-details">
-        {hoveredDistrict ? (
+        {displayDistrict ? (
           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             <div className="state-main-info">
-              <span className="state-name">{hoveredDistrict}</span>
-              <span className="state-value">{karnatakaDistrictData[hoveredDistrict] || "Data not available"} mbgl</span>
+              <span className="state-name">{displayDistrict}</span>
+              <span className="state-value">{karnatakaDistrictData[displayDistrict] || "N/A"} mbgl</span>
             </div>
-            {contaminantData[hoveredDistrict] && (
+            {contaminantData[displayDistrict] && (
               <div className="contaminant-warning" style={{ fontSize: "0.85rem", opacity: 0.9 }}>
-                Contaminants: {contaminantData[hoveredDistrict].join(", ")}
+                Contaminants: {contaminantData[displayDistrict].join(", ")}
               </div>
             )}
           </div>
         ) : (
-          <div className="placeholder">Click on a district for details</div>
+          <div className="placeholder">Hover over or click a district for details</div>
         )}
       </div>
 
@@ -51,9 +55,11 @@ const KarnatakaMap = ({ onBack }) => {
               strokeWidth="1"
               onMouseEnter={() => setHoveredDistrict(name)}
               onMouseLeave={() => setHoveredDistrict(null)}
+              onClick={() => setSelectedDistrict(name)}
               className="district-path"
+              style={{ cursor: "pointer" }}
             >
-              <title>{name}</title>
+              <title>{name}: {karnatakaDistrictData[name] || "N/A"} mbgl</title>
             </path>
           ))}
         </svg>

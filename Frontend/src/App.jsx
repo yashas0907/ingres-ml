@@ -237,8 +237,9 @@ export default function App() {
             )}
 
             {messages.map((m, i) => (
-              <div key={i} className={`msg ${m.type} msg-animate`}>
+              <div key={i} className={`msg ${m.type}`}>
                 {m.type === "bot" && <div className="bot-avatar">🌊</div>}
+                <div className={m.type === "bot" ? "bot-content-wrapper" : undefined}>
                 <div className="bubble">
                   {m.type === "bot"
                     ? <div className="bot-text-content" dangerouslySetInnerHTML={{ __html: formatText(m.text) }} />
@@ -370,19 +371,20 @@ export default function App() {
                     </div>
                   </div>
                 )}
+                </div>
               </div>
             ))}
 
             {loading && (
-              <div className="msg bot msg-animate">
+              <div className="msg bot">
                 <div className="bot-avatar">🌊</div>
+                <div className="bot-content-wrapper">
                 <div className="bubble">
-                  <div className="typing-indicator">
-                    <div className="typing-dots">
-                      <span></span><span></span><span></span>
-                    </div>
-                    <span className="loading-text">INGRES is thinking…</span>
+                  <div className="water-loader-container">
+                    <div className="water-loader"></div>
+                    <span className="loading-text">Analyzing groundwater data…</span>
                   </div>
+                </div>
                 </div>
               </div>
             )}
