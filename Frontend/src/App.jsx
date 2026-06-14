@@ -192,16 +192,17 @@ export default function App() {
   const formatText = (text) => {
     if (!text) return "";
     let html = text
-      // Headings: ### Title
-      .replace(/###\s*(.*?)(?:\n|$)/g, '<div class="bot-heading">$1</div>')
       // Bold: **text**
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      // Bullet points: • item or * item or - item (at start of line)
-      .replace(/^[•\*\-]\s+(.+)$/gm, '<li>$1</li>')
-      // Wrap consecutive <li> in <ul>
-      .replace(/(<li>.*?<\/li>\n?)+/gs, (match) => `<ul class="bot-list">${match}</ul>`)
-      // Line breaks
-      .replace(/\n/g, '<br/>');
+      // Remove headings: ### Title -> Title
+      .replace(/###\s*(.*?)(?:\n|$)/g, '$1 ')
+      // Remove bullet points: • item or * item or - item (with optional leading space) -> item
+      .replace(/^\s*[•\*\-]\s+(.+)$/gm, '$1')
+      // Replace all newlines with a single space to make it a single paragraph
+      .replace(/\s*\n\s*/g, ' ')
+      // Replace multiple spaces with a single space
+      .replace(/\s+/g, ' ')
+      .trim();
     return html;
   };
 
@@ -269,155 +270,162 @@ export default function App() {
             {messages.map((m, i) => (
               <div key={i} className={`msg ${m.type} msg-animate`}>
                 {m.type === "bot" && <div className="bot-avatar">🌊</div>}
-                <div className="bubble">
-                  {m.type === "bot"
-                    ? <div className="bot-text-content" dangerouslySetInnerHTML={{ __html: formatText(m.text) }} />
-                    : m.text
-                  }
-                </div>
+                {m.type === "bot" ? (
+                  <div className="bot-content-wrapper">
+                    <div className="bubble">
+                      <div className="bot-text-content" dangerouslySetInnerHTML={{ __html: formatText(m.text) }} />
+                    </div>
 
-                {m.type === "bot" && m.imageUrl && (
-                  <div className="bot-image-container">
-                    <img src={m.imageUrl} alt="Groundwater visual" className="bot-image" />
-                    {m.showLegend && <div className="chat-legend-wrapper"><MapLegend /></div>}
-                  </div>
-                )}
+                    {m.imageUrl && (
+                      <div className="bot-image-container">
+                        <img src={m.imageUrl} alt="Groundwater visual" className="bot-image" />
+                        {m.showLegend && <div className="chat-legend-wrapper"><MapLegend /></div>}
+                      </div>
+                    )}
 
-                {m.visualType === "status_card" && m.visualData && (
-                  <div className="status-card">
-                    <div className="status-header">
-                      <h3>{m.visualData.name}</h3>
-                      <span className={`category-badge ${m.visualData.category.toLowerCase().replace(" ", "-")}`}>
-                        {m.visualData.category}
-                      </span>
-                    </div>
-                    <div className="status-grid">
-                      <div className="status-item"><label>Extraction</label><span>{m.visualData.extraction}%</span></div>
-                      <div className="status-item"><label>Trend</label><span>{m.visualData.trend}</span></div>
-                    </div>
-                    <div className="status-info">
-                      <p><strong>Cause:</strong> {m.visualData.mainCause}</p>
-                      <p><strong>Risk:</strong> {m.visualData.topRisk}</p>
-                    </div>
-                    <div className="status-action">
-                      <strong>Action:</strong> {m.visualData.recommendedAction}
-                    </div>
-                  </div>
-                )}
-
-                {m.visualType === "comparison_bars" && m.visualData && (
-                  <div className="comparison-container">
-                    <h3>Regional Comparison</h3>
-                    <div className="comparison-bars-list">
-                      {m.visualData.map((d, di) => (
-                        <div key={di} className="comparison-bar-row">
-                          <div className="bar-label">{d.name}</div>
-                          <div className="bar-wrapper">
-                            <div className={`bar-fill ${d.category.toLowerCase().replace(" ", "-")}`}
-                              style={{ width: `${Math.min(d.extraction, 100)}%` }}></div>
-                            <span className="bar-value">{d.extraction}%</span>
-                          </div>
+                    {m.visualType === "status_card" && m.visualData && (
+                      <div className="status-card">
+                        <div className="status-header">
+                          <h3>{m.visualData.name}</h3>
+                          <span className={`category-badge ${m.visualData.category.toLowerCase().replace(" ", "-")}`}>
+                            {m.visualData.category}
+                          </span>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                        <div className="status-grid">
+                          <div className="status-item"><label>Extraction</label><span>{m.visualData.extraction}%</span></div>
+                          <div className="status-item"><label>Trend</label><span>{m.visualData.trend}</span></div>
+                        </div>
+                        <div className="status-info">
+                          <p><strong>Cause:</strong> {m.visualData.mainCause}</p>
+                          <p><strong>Risk:</strong> {m.visualData.topRisk}</p>
+                        </div>
+                        <div className="status-action">
+                          <strong>Action:</strong> {m.visualData.recommendedAction}
+                        </div>
+                      </div>
+                    )}
 
-                {m.visualType === "risk_alert" && m.visualData && (
-                  <div className="risk-alert-card">
-                    <div className="alert-header">
-                      <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" strokeWidth="2" fill="none">
-                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-                        <line x1="12" y1="9" x2="12" y2="13"></line>
-                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
-                      </svg>
-                      <h4>Water Quality Alert</h4>
-                    </div>
-                    <div className="alert-content">
-                      <p><strong>Contaminants:</strong> {m.visualData.contaminantList.join(", ")}</p>
-                      <p>{m.visualData.healthRisk}</p>
-                    </div>
-                    <div className="alert-footer">
-                      <strong>Mitigation:</strong> {m.visualData.suggestedMitigation}
-                    </div>
-                  </div>
-                )}
+                    {m.visualType === "comparison_bars" && m.visualData && (
+                      <div className="comparison-container">
+                        <h3>Regional Comparison</h3>
+                        <div className="comparison-bars-list">
+                          {m.visualData.map((d, di) => (
+                            <div key={di} className="comparison-bar-row">
+                              <div className="bar-label">{d.name}</div>
+                              <div className="bar-wrapper">
+                                <div className={`bar-fill ${d.category.toLowerCase().replace(" ", "-")}`}
+                                  style={{ width: `${Math.min(d.extraction, 100)}%` }}></div>
+                                <span className="bar-value">{d.extraction}%</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
-                {m.visualType === "trend_line" && m.visualData && (
-                  <div className="chart-card trend-card">
-                    <h3>{m.visualData.name} Extraction Trend</h3>
-                    <div className="chart-container">
-                      <Line data={{
-                        labels: m.visualData.labels,
-                        datasets: [{
-                          label: "Extraction (%)", data: m.visualData.values, fill: false,
-                          borderColor: "#011627", backgroundColor: "#011627", tension: 0.3,
-                          pointRadius: 6, pointHoverRadius: 8
-                        }]
-                      }} options={{
-                        responsive: true, maintainAspectRatio: false,
-                        plugins: { legend: { display: false } },
-                        scales: { y: { beginAtZero: false, ticks: { callback: (v) => `${v}%` } } }
-                      }} />
-                    </div>
-                    <div className={`trend-diagnostic ${m.visualData.diagnostic}`}>
-                      Status: {m.visualData.diagnostic.charAt(0).toUpperCase() + m.visualData.diagnostic.slice(1)}
-                    </div>
-                  </div>
-                )}
+                    {m.visualType === "risk_alert" && m.visualData && (
+                      <div className="risk-alert-card">
+                        <div className="alert-header">
+                          <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" strokeWidth="2" fill="none">
+                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                            <line x1="12" y1="9" x2="12" y2="13"></line>
+                            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                          </svg>
+                          <h4>Water Quality Alert</h4>
+                        </div>
+                        <div className="alert-content">
+                          <p><strong>Contaminants:</strong> {m.visualData.contaminantList.join(", ")}</p>
+                          <p>{m.visualData.healthRisk}</p>
+                        </div>
+                        <div className="alert-footer">
+                          <strong>Mitigation:</strong> {m.visualData.suggestedMitigation}
+                        </div>
+                      </div>
+                    )}
 
-                {m.type === "bot" && m.suggestions?.length > 0 && (
-                  <div className="bot-suggestions">
-                    {m.suggestions.map((s, si) => (
-                      <button key={si} className="suggestion-btn small" onClick={() => sendMessage(s)}>{s}</button>
-                    ))}
-                  </div>
-                )}
+                    {m.visualType === "trend_line" && m.visualData && (
+                      <div className="chart-card trend-card">
+                        <h3>{m.visualData.name} Extraction Trend</h3>
+                        <div className="chart-container">
+                          <Line data={{
+                            labels: m.visualData.labels,
+                            datasets: [{
+                              label: "Extraction (%)", data: m.visualData.values, fill: false,
+                              borderColor: "#011627", backgroundColor: "#011627", tension: 0.3,
+                              pointRadius: 6, pointHoverRadius: 8
+                            }]
+                          }} options={{
+                            responsive: true, maintainAspectRatio: false,
+                            plugins: { legend: { display: false } },
+                            scales: { y: { beginAtZero: false, ticks: { callback: (v) => `${v}%` } } }
+                          }} />
+                        </div>
+                        <div className={`trend-diagnostic ${m.visualData.diagnostic}`}>
+                          Status: {m.visualData.diagnostic.charAt(0).toUpperCase() + m.visualData.diagnostic.slice(1)}
+                        </div>
+                      </div>
+                    )}
 
-                {m.chartData?.length > 0 && (
-                  <div className="chart-card">
-                    <div className="chart-container">
-                      <Bar data={{
-                        labels: m.chartData.map((d) => d.name),
-                        datasets: [{
-                          label: "Extraction (%)",
-                          data: m.chartData.map((d) => d.extraction),
-                          backgroundColor: m.chartData.map((d) =>
-                            d.extraction <= 70 ? "rgba(46,204,113,0.85)" : d.extraction <= 100 ? "rgba(241,196,15,0.85)" : "rgba(231,76,60,0.85)"
-                          ),
-                          borderColor: m.chartData.map((d) =>
-                            d.extraction <= 70 ? "#27ae60" : d.extraction <= 100 ? "#f39c12" : "#c0392b"
-                          ),
-                          borderWidth: 1, borderRadius: 8
-                        }]
-                      }} options={{
-                        responsive: true, maintainAspectRatio: false,
-                        animation: { duration: 2000, easing: "easeOutQuart" },
-                        plugins: { legend: { display: false } },
-                        scales: {
-                          y: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.05)" }, ticks: { callback: (v) => `${v}%` } },
-                          x: { grid: { display: false } }
+                    {m.suggestions?.length > 0 && (
+                      <div className="bot-suggestions">
+                        {m.suggestions.map((s, si) => (
+                          <button key={si} className="suggestion-btn small" onClick={() => sendMessage(s)}>{s}</button>
+                        ))}
+                      </div>
+                    )}
+
+                    {m.chartData?.length > 0 && (
+                      <div className="chart-card">
+                        <div className="chart-container">
+                          <Bar data={{
+                            labels: m.chartData.map((d) => d.name),
+                            datasets: [{
+                              label: "Extraction (%)",
+                              data: m.chartData.map((d) => d.extraction),
+                              backgroundColor: m.chartData.map((d) =>
+                                d.extraction <= 70 ? "rgba(46,204,113,0.85)" : d.extraction <= 100 ? "rgba(241,196,15,0.85)" : "rgba(231,76,60,0.85)"
+                              ),
+                              borderColor: m.chartData.map((d) =>
+                                d.extraction <= 70 ? "#27ae60" : d.extraction <= 100 ? "#f39c12" : "#c0392b"
+                              ),
+                              borderWidth: 1, borderRadius: 8
+                            }]
+                          }} options={{
+                            responsive: true, maintainAspectRatio: false,
+                            animation: { duration: 2000, easing: "easeOutQuart" },
+                            plugins: { legend: { display: false } },
+                            scales: {
+                              y: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.05)" }, ticks: { callback: (v) => `${v}%` } },
+                              x: { grid: { display: false } }
                         }
                       }} />
                     </div>
                   </div>
                 )}
               </div>
-            ))}
-
-            {loading && (
-              <div className="msg bot msg-animate">
-                <div className="bot-avatar">🌊</div>
-                <div className="bubble">
-                  <div className="typing-indicator">
-                    <div className="typing-dots">
-                      <span></span><span></span><span></span>
-                    </div>
-                    <span className="loading-text">INGRES is thinking…</span>
-                  </div>
-                </div>
+            ) : (
+              <div className="bubble">
+                {m.text}
               </div>
             )}
+          </div>
+        ))}
+
+        {loading && (
+          <div className="msg bot msg-animate">
+            <div className="bot-avatar">🌊</div>
+            <div className="bot-content-wrapper">
+              <div className="bubble">
+                <div className="typing-indicator">
+                  <div className="typing-dots">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <span className="loading-text">INGRES is thinking…</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
             <div ref={bottomRef} />
           </div>
         )}
